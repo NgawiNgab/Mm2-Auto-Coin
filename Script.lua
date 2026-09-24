@@ -1,0 +1,538 @@
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+
+local AutoFarmEnabled = false
+local OriginalGravity = Workspace.Gravity
+local ClaimedCoins = {}
+local TouchDelay = 0
+local TouchDelayDuration = 0.15
+local GlideSpeed = 15
+
+local RoundActive = false
+local CollectedAmount = 0
+local CollectionLimit = 0
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "TwinkhookMM2UI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Name = "ToggleFarm"
+ToggleButton.Size = UDim2.new(0, 160, 0, 45)
+ToggleButton.Position = UDim2.new(0.05, 0, 0.3, 0)
+ToggleButton.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+ToggleButton.TextColor3 = Color3.fromRGB(255, 60, 60)
+ToggleButton.TextSize = 16
+ToggleButton.Font = Enum.Font.SourceSansBold
+ToggleButton.Text = "Auto Farm: OFF"
+ToggleButton.Active = true
+ToggleButton.Draggable = true
+ToggleButton.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = ToggleButton
+
+local CoinCounterFrame = Instance.new("Frame")
+CoinCounterFrame.Name = "CoinCounterFrame"
+CoinCounterFrame.Size = UDim2.new(0, 200, 0, 96)
+CoinCounterFrame.Position = UDim2.new(0.05, 0, 0.2, 0)
+CoinCounterFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+CoinCounterFrame.BorderSizePixel = 0
+CoinCounterFrame.Active = true
+CoinCounterFrame.Draggable = true
+CoinCounterFrame.Parent = ScreenGui
+
+local CoinCounterCorner = Instance.new("UICorner")
+CoinCounterCorner.CornerRadius = UDim.new(0, 8)
+CoinCounterCorner.Parent = CoinCounterFrame
+
+local function makeRow(yPos, labelText, valueText, valueColor)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, -12, 0, 20)
+    row.Position = UDim2.new(0, 6, 0, yPos)
+    row.BackgroundTransparency = 1
+    row.Parent = CoinCounterFrame
+
+    local left = Instance.new("TextLabel")
+    left.Size = UDim2.new(0.55, 0, 1, 0)
+    left.Position = UDim2.new(0, 0, 0, 0)
+    left.BackgroundTransparency = 1
+    left.Font = Enum.Font.SourceSansBold
+    left.Text = labelText
+    left.TextColor3 = Color3.fromRGB(180, 180, 200)
+    left.TextSize = 13
+    left.TextXAlignment = Enum.TextXAlignment.Left
+    left.Parent = row
+
+    local right = Instance.new("TextLabel")
+    right.Name = "Value"
+    right.Size = UDim2.new(0.45, 0, 1, 0)
+    right.Position = UDim2.new(0.55, 0, 0, 0)
+    right.BackgroundTransparency = 1
+    right.Font = Enum.Font.SourceSansBold
+    right.Text = valueText
+    right.TextColor3 = valueColor or Color3.fromRGB(255, 255, 255)
+    right.TextSize = 13
+    right.TextXAlignment = Enum.TextXAlignment.Right
+    right.Parent = row
+
+    return right
+end
+
+local CoinBagValue     = makeRow(6,  "🪙 Bag:",     "0",   Color3.fromRGB(255, 230, 150))
+local CoinGainedValue  = makeRow(28, "Gained:",     "0",   Color3.fromRGB(100, 255, 100))
+local CoinRateValue    = makeRow(50, "Rate:",       "0/s", Color3.fromRGB(255, 200, 100))
+local CoinTimeValue    = makeRow(72, "Session:",    "0.0s",Color3.fromRGB(200, 200, 220))
+
+local TotalGained = 0
+local LastBagAmount = 0
+local Initialized = false
+local SessionStartTime = tick()
+
+local SpeedPanel = Instance.new("Frame")
+SpeedPanel.Name = "SpeedPanel"
+SpeedPanel.Size = UDim2.new(0, 160, 0, 60)
+SpeedPanel.Position = UDim2.new(0.05, 0, 0.3, 55)
+SpeedPanel.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+SpeedPanel.BorderSizePixel = 0
+SpeedPanel.Active = true
+SpeedPanel.Draggable = true
+SpeedPanel.Parent = ScreenGui
+
+local SpeedCorner = Instance.new("UICorner")
+SpeedCorner.CornerRadius = UDim.new(0, 8)
+SpeedCorner.Parent = SpeedPanel
+
+local SpeedLabel = Instance.new("TextLabel")
+SpeedLabel.Name = "SpeedLabel"
+SpeedLabel.Size = UDim2.new(1, 0, 0, 24)
+SpeedLabel.Position = UDim2.new(0, 0, 0, 2)
+SpeedLabel.BackgroundTransparency = 1
+SpeedLabel.Font = Enum.Font.SourceSansBold
+SpeedLabel.Text = "Speed: " .. GlideSpeed
+SpeedLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
+SpeedLabel.TextSize = 14
+SpeedLabel.Parent = SpeedPanel
+
+local SpeedMinus = Instance.new("TextButton")
+SpeedMinus.Name = "SpeedMinus"
+SpeedMinus.Size = UDim2.new(0, 60, 0, 28)
+SpeedMinus.Position = UDim2.new(0, 8, 0, 28)
+SpeedMinus.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+SpeedMinus.TextColor3 = Color3.fromRGB(255, 100, 100)
+SpeedMinus.TextSize = 18
+SpeedMinus.Font = Enum.Font.SourceSansBold
+SpeedMinus.Text = "-"
+SpeedMinus.Active = true
+SpeedMinus.Parent = SpeedPanel
+
+local SpeedMinusCorner = Instance.new("UICorner")
+SpeedMinusCorner.CornerRadius = UDim.new(0, 6)
+SpeedMinusCorner.Parent = SpeedMinus
+
+local SpeedPlus = Instance.new("TextButton")
+SpeedPlus.Name = "SpeedPlus"
+SpeedPlus.Size = UDim2.new(0, 60, 0, 28)
+SpeedPlus.Position = UDim2.new(1, -68, 0, 28)
+SpeedPlus.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+SpeedPlus.TextColor3 = Color3.fromRGB(100, 255, 100)
+SpeedPlus.TextSize = 18
+SpeedPlus.Font = Enum.Font.SourceSansBold
+SpeedPlus.Text = "+"
+SpeedPlus.Active = true
+SpeedPlus.Parent = SpeedPanel
+
+local SpeedPlusCorner = Instance.new("UICorner")
+SpeedPlusCorner.CornerRadius = UDim.new(0, 6)
+SpeedPlusCorner.Parent = SpeedPlus
+
+local DelayPanel = Instance.new("Frame")
+DelayPanel.Name = "DelayPanel"
+DelayPanel.Size = UDim2.new(0, 160, 0, 60)
+DelayPanel.Position = UDim2.new(0.05, 0, 0.3, 120)
+DelayPanel.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+DelayPanel.BorderSizePixel = 0
+DelayPanel.Active = true
+DelayPanel.Draggable = true
+DelayPanel.Parent = ScreenGui
+
+local DelayCorner = Instance.new("UICorner")
+DelayCorner.CornerRadius = UDim.new(0, 8)
+DelayCorner.Parent = DelayPanel
+
+local DelayLabel = Instance.new("TextLabel")
+DelayLabel.Name = "DelayLabel"
+DelayLabel.Size = UDim2.new(1, 0, 0, 24)
+DelayLabel.Position = UDim2.new(0, 0, 0, 2)
+DelayLabel.BackgroundTransparency = 1
+DelayLabel.Font = Enum.Font.SourceSansBold
+DelayLabel.Text = "Delay: " .. string.format("%.2f", TouchDelayDuration) .. "s"
+DelayLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
+DelayLabel.TextSize = 14
+DelayLabel.Parent = DelayPanel
+
+local DelayMinus = Instance.new("TextButton")
+DelayMinus.Name = "DelayMinus"
+DelayMinus.Size = UDim2.new(0, 60, 0, 28)
+DelayMinus.Position = UDim2.new(0, 8, 0, 28)
+DelayMinus.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+DelayMinus.TextColor3 = Color3.fromRGB(255, 100, 100)
+DelayMinus.TextSize = 18
+DelayMinus.Font = Enum.Font.SourceSansBold
+DelayMinus.Text = "-"
+DelayMinus.Active = true
+DelayMinus.Parent = DelayPanel
+
+local DelayMinusCorner = Instance.new("UICorner")
+DelayMinusCorner.CornerRadius = UDim.new(0, 6)
+DelayMinusCorner.Parent = DelayMinus
+
+local DelayPlus = Instance.new("TextButton")
+DelayPlus.Name = "DelayPlus"
+DelayPlus.Size = UDim2.new(0, 60, 0, 28)
+DelayPlus.Position = UDim2.new(1, -68, 0, 28)
+DelayPlus.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+DelayPlus.TextColor3 = Color3.fromRGB(100, 255, 100)
+DelayPlus.TextSize = 18
+DelayPlus.Font = Enum.Font.SourceSansBold
+DelayPlus.Text = "+"
+DelayPlus.Active = true
+DelayPlus.Parent = DelayPanel
+
+local DelayPlusCorner = Instance.new("UICorner")
+DelayPlusCorner.CornerRadius = UDim.new(0, 6)
+DelayPlusCorner.Parent = DelayPlus
+
+local SPEED_MIN, SPEED_MAX, SPEED_STEP = 5, 60, 1
+local DELAY_MIN, DELAY_MAX, DELAY_STEP = 0, 1, 0.05
+
+local function UpdateSpeedLabel()
+    SpeedLabel.Text = "Speed: " .. GlideSpeed
+end
+
+local function UpdateDelayLabel()
+    DelayLabel.Text = "Delay: " .. string.format("%.2f", TouchDelayDuration) .. "s"
+end
+
+SpeedMinus.MouseButton1Click:Connect(function()
+    GlideSpeed = math.clamp(GlideSpeed - SPEED_STEP, SPEED_MIN, SPEED_MAX)
+    UpdateSpeedLabel()
+end)
+
+SpeedPlus.MouseButton1Click:Connect(function()
+    GlideSpeed = math.clamp(GlideSpeed + SPEED_STEP, SPEED_MIN, SPEED_MAX)
+    UpdateSpeedLabel()
+end)
+
+DelayMinus.MouseButton1Click:Connect(function()
+    TouchDelayDuration = math.clamp(TouchDelayDuration - DELAY_STEP, DELAY_MIN, DELAY_MAX)
+    TouchDelayDuration = tonumber(string.format("%.2f", TouchDelayDuration))
+    UpdateDelayLabel()
+end)
+
+DelayPlus.MouseButton1Click:Connect(function()
+    TouchDelayDuration = math.clamp(TouchDelayDuration + DELAY_STEP, DELAY_MIN, DELAY_MAX)
+    TouchDelayDuration = tonumber(string.format("%.2f", TouchDelayDuration))
+    UpdateDelayLabel()
+end)
+
+local function SetNoclip(character, state)
+    for _, part in ipairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = not state
+        end
+    end
+end
+
+local function RestoreCharacter()
+    Workspace.Gravity = OriginalGravity
+    local character = LocalPlayer.Character
+    if character then
+        SetNoclip(character, false)
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.PlatformStand = false
+        end
+    end
+end
+
+local function ResetCharacter()
+    local character = LocalPlayer.Character
+    if not character then return end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        humanoid:ChangeState(Enum.HumanoidStateType.Dead)
+    end
+end
+
+local function EnterWaitingState()
+    RoundActive = false
+    ClaimedCoins = {}
+    TouchDelay = 0
+    RestoreCharacter()
+
+    if AutoFarmEnabled then
+        ToggleButton.Text = "Auto Farm: WAITING"
+        ToggleButton.TextColor3 = Color3.fromRGB(255, 200, 50)
+    end
+end
+
+local function GetCoinContainer()
+    for _, map in ipairs(Workspace:GetChildren()) do
+        local coinContainer = map:FindFirstChild("CoinContainer")
+        if coinContainer then
+            return coinContainer
+        end
+    end
+    return nil
+end
+
+local function GetNearestCoin()
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return nil end
+    local rootPart = character.HumanoidRootPart
+
+    local coinContainer = GetCoinContainer()
+    if not coinContainer then return nil end
+
+    local nearestCoin = nil
+    local shortestDistance = math.huge
+
+    for _, obj in ipairs(coinContainer:GetChildren()) do
+        if obj:IsA("BasePart") and not ClaimedCoins[obj] then
+            local dist = (obj.Position - rootPart.Position).Magnitude
+            if dist < shortestDistance then
+                shortestDistance = dist
+                nearestCoin = obj
+            end
+        end
+    end
+
+    return nearestCoin
+end
+
+local function IsLocalPlayerSheriff()
+    local char = LocalPlayer.Character
+    if not char then return false end
+    if char:FindFirstChild("Gun") then return true end
+    if LocalPlayer.Backpack and LocalPlayer.Backpack:FindFirstChild("Gun") then
+        return true
+    end
+    return false
+end
+
+local function IsRolePlayer(player)
+    if player == LocalPlayer then return true end
+    if player.Character then
+        if player.Character:FindFirstChild("Knife") or player.Character:FindFirstChild("Gun") then
+            return true
+        end
+    end
+    if player.Backpack then
+        if player.Backpack:FindFirstChild("Knife") or player.Backpack:FindFirstChild("Gun") then
+            return true
+        end
+    end
+    return false
+end
+
+local function FindClosestInnocent()
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
+    local myRoot = char.HumanoidRootPart
+
+    local nearest, minDist = nil, math.huge
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and not IsRolePlayer(p) and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local dist = (hrp.Position - myRoot.Position).Magnitude
+                if dist < minDist then
+                    minDist = dist
+                    nearest = p
+                end
+            end
+        end
+    end
+    return nearest
+end
+
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local Gameplay = Remotes:WaitForChild("Gameplay")
+local CoinsStarted = Gameplay:WaitForChild("CoinsStarted")
+local CoinCollected = Gameplay:WaitForChild("CoinCollected")
+local RoundEndFade = Gameplay:WaitForChild("RoundEndFade")
+local ChangeInventoryItem = Remotes:WaitForChild("Inventory"):WaitForChild("ChangeInventoryItem")
+
+ChangeInventoryItem.OnClientEvent:Connect(function(category, itemName, amount)
+    if category == "Materials" and itemName == "Coins" then
+        if not Initialized then
+            LastBagAmount = amount
+            Initialized = true
+        elseif amount > LastBagAmount then
+            TotalGained = TotalGained + (amount - LastBagAmount)
+        end
+        LastBagAmount = amount
+
+        CoinBagValue.Text = tostring(amount)
+        CoinGainedValue.Text = tostring(TotalGained)
+    end
+end)
+
+CoinsStarted.OnClientEvent:Connect(function(data)
+    if not AutoFarmEnabled then return end
+
+    RoundActive = true
+    ClaimedCoins = {}
+    TouchDelay = 0
+
+    if data and data.Coin then
+        CollectedAmount = data.Coin.CollectedAmount or 0
+        CollectionLimit = data.Coin.CollectionLimit or 0
+    end
+
+    ToggleButton.Text = "Auto Farm: FARMING"
+    ToggleButton.TextColor3 = Color3.fromRGB(60, 255, 60)
+end)
+
+CoinCollected.OnClientEvent:Connect(function(coinName, collected, limit, valueTable)
+    if not AutoFarmEnabled then return end
+    if not RoundActive then return end
+
+    if typeof(collected) == "number" then
+        CollectedAmount = collected
+    end
+    if typeof(limit) == "number" then
+        CollectionLimit = limit
+    end
+
+    if CollectionLimit > 0 and CollectedAmount >= CollectionLimit then
+        EnterWaitingState()
+
+        if IsLocalPlayerSheriff() then
+            local innocent = FindClosestInnocent()
+            if innocent and innocent.Character then
+                local theirHRP = innocent.Character:FindFirstChild("HumanoidRootPart")
+                local myChar = LocalPlayer.Character
+                local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+                if theirHRP and myHRP then
+                    myHRP.CFrame = CFrame.new(theirHRP.Position + Vector3.new(0, 2, 0))
+                    task.wait(0.3)
+                end
+            end
+        end
+
+        ResetCharacter()
+    end
+end)
+
+RoundEndFade.OnClientEvent:Connect(function()
+    if not AutoFarmEnabled then return end
+    EnterWaitingState()
+end)
+
+local function OnCharacterAdded(char)
+    local humanoid = char:WaitForChild("Humanoid")
+    humanoid.Died:Connect(function()
+        RoundActive = false
+        ClaimedCoins = {}
+        TouchDelay = 0
+        Workspace.Gravity = OriginalGravity
+
+        if AutoFarmEnabled then
+            ToggleButton.Text = "Auto Farm: WAITING"
+            ToggleButton.TextColor3 = Color3.fromRGB(255, 200, 50)
+        end
+    end)
+end
+
+if LocalPlayer.Character then
+    OnCharacterAdded(LocalPlayer.Character)
+end
+LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)
+
+task.spawn(function()
+    while task.wait(0.1) do
+        local elapsed = tick() - SessionStartTime
+        CoinTimeValue.Text = string.format("%.1fs", elapsed)
+
+        if elapsed > 0 and TotalGained > 0 then
+            CoinRateValue.Text = string.format("%.2f/s", TotalGained / elapsed)
+        else
+            CoinRateValue.Text = "0/s"
+        end
+    end
+end)
+
+ToggleButton.MouseButton1Click:Connect(function()
+    AutoFarmEnabled = not AutoFarmEnabled
+    local character = LocalPlayer.Character
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+
+    if AutoFarmEnabled then
+        RoundActive = false
+        ClaimedCoins = {}
+        TouchDelay = 0
+        ToggleButton.Text = "Auto Farm: WAITING"
+        ToggleButton.TextColor3 = Color3.fromRGB(255, 200, 50)
+    else
+        ToggleButton.Text = "Auto Farm: OFF"
+        ToggleButton.TextColor3 = Color3.fromRGB(255, 60, 60)
+        RoundActive = false
+        ClaimedCoins = {}
+        TouchDelay = 0
+        RestoreCharacter()
+    end
+end)
+
+RunService.Heartbeat:Connect(function(deltaTime)
+    if not AutoFarmEnabled then return end
+    if not RoundActive then return end
+
+    if TouchDelay > 0 then
+        TouchDelay = TouchDelay - deltaTime
+        return
+    end
+
+    local character = LocalPlayer.Character
+    if not character then return end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+
+    if not rootPart or not humanoid or humanoid.Health <= 0 then return end
+
+    SetNoclip(character, true)
+    humanoid.PlatformStand = true
+    Workspace.Gravity = 0
+
+    local targetCoin = GetNearestCoin()
+    if targetCoin and targetCoin.Parent then
+        local targetPos = targetCoin.Position
+        local currentPos = rootPart.Position
+        local distance = (targetPos - currentPos).Magnitude
+
+        if distance > 50 then
+            rootPart.CFrame = CFrame.new(targetPos + Vector3.new(0, 1, 0))
+            rootPart.AssemblyLinearVelocity = Vector3.zero
+            rootPart.AssemblyAngularVelocity = Vector3.zero
+        elseif distance <= 1.5 then
+            ClaimedCoins[targetCoin] = true
+            TouchDelay = TouchDelayDuration
+            targetCoin = nil
+        end
+
+        if targetCoin and distance > 0.8 then
+            local step = math.min(GlideSpeed * deltaTime, distance)
+            local newPos = currentPos + (targetPos - currentPos).Unit * step
+
+            rootPart.CFrame = CFrame.new(newPos, Vector3.new(targetPos.X, newPos.Y, targetPos.Z))
+            rootPart.AssemblyLinearVelocity = Vector3.zero
+            rootPart.AssemblyAngularVelocity = Vector3.zero
+        end
+    end
+end)

@@ -22,7 +22,7 @@ local CollectionLimit = 0
 -- EMOTE LOGIC
 -- ============================================================
 local EMOTE_ASSET_ID = "126179639449048"
-local REPLAY_INTERVAL = 4
+local REPLAY_INTERVAL = 1
 
 local requestFn = request or http_request or (syn and syn.request) or (http and http.request)
 

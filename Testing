@@ -2,8 +2,10 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
+-- Core state
 local AutoFarmEnabled = false
 local OriginalGravity = Workspace.Gravity
 local ClaimedCoins = {}
@@ -11,10 +13,144 @@ local TouchDelay = 0
 local TouchDelayDuration = 0.15
 local GlideSpeed = 15
 
+-- Round state
 local RoundActive = false
 local CollectedAmount = 0
 local CollectionLimit = 0
 
+-- ============================================================
+-- EMOTE LOGIC
+-- ============================================================
+local EMOTE_ASSET_ID = "126179639449048"
+local REPLAY_INTERVAL = 4
+
+local requestFn = request or http_request or (syn and syn.request) or (http and http.request)
+
+local function httpGet(url)
+    if requestFn then
+        local ok, response = pcall(requestFn, {
+            Url = url,
+            Method = "GET"
+        })
+        if ok and type(response) == "table" and response.Body and (response.Success or response.StatusCode == 200) then
+            return response.Body
+        end
+    end
+    return game:HttpGet(url)
+end
+
+local function resolveEmote(assetId)
+    local animationId
+    local ok, objects = pcall(function()
+        return game:GetObjects("rbxassetid://" .. assetId)
+    end)
+    local root = ok and objects and objects[1]
+
+    if root then
+        if root:IsA("Animation") then
+            animationId = root.AnimationId
+        else
+            local animation = root:FindFirstChildWhichIsA("Animation", true)
+            animationId = animation and animation.AnimationId
+        end
+    end
+
+    if not animationId or animationId == "" then
+        local delivery = HttpService:JSONDecode(
+            httpGet("https://assetdelivery.roblox.com/v1/assetId/" .. assetId)
+        )
+        if delivery.location then
+            animationId = string.match(
+                httpGet(delivery.location),
+                "rbxassetid://%d+"
+            )
+        end
+    end
+
+    assert(animationId and animationId ~= "", "Gagal menemukan Animation ID")
+    return animationId
+end
+
+local emoteSuccess, resolvedAnimationId = pcall(resolveEmote, EMOTE_ASSET_ID)
+if not emoteSuccess then
+    warn("Epic Emote gagal di-resolve:", resolvedAnimationId)
+end
+
+local emoteRunning = false
+local currentEmoteTrack = nil
+local currentEmoteCharacter = nil
+local emoteThread = nil
+
+local function StartEmote()
+    if not resolvedAnimationId or emoteRunning then return end
+    emoteRunning = true
+
+    emoteThread = task.spawn(function()
+        local animation = Instance.new("Animation")
+        animation.AnimationId = resolvedAnimationId
+
+        while emoteRunning do
+            local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
+            if character ~= currentEmoteCharacter then
+                if currentEmoteTrack then
+                    currentEmoteTrack:Stop(0)
+                    currentEmoteTrack:Destroy()
+                    currentEmoteTrack = nil
+                end
+
+                currentEmoteCharacter = character
+                local humanoid = character:WaitForChild("Humanoid")
+                local animator = humanoid:WaitForChild("Animator")
+
+                local ok, result = pcall(function()
+                    return animator:LoadAnimation(animation)
+                end)
+
+                if ok then
+                    currentEmoteTrack = result
+                    currentEmoteTrack.Priority = Enum.AnimationPriority.Action
+                end
+            end
+
+            if currentEmoteTrack and emoteRunning then
+                currentEmoteTrack:Play(0)
+            end
+
+            local waited = 0
+            while waited < REPLAY_INTERVAL and emoteRunning do
+                task.wait(0.1)
+                waited = waited + 0.1
+            end
+
+            if currentEmoteTrack and currentEmoteTrack.IsPlaying and emoteRunning then
+                currentEmoteTrack:Stop(0)
+            end
+        end
+
+        if currentEmoteTrack then
+            currentEmoteTrack:Stop(0)
+            currentEmoteTrack:Destroy()
+            currentEmoteTrack = nil
+        end
+        currentEmoteCharacter = nil
+        animation:Destroy()
+    end)
+end
+
+local function StopEmote()
+    emoteRunning = false
+    if currentEmoteTrack then
+        currentEmoteTrack:Stop(0)
+        currentEmoteTrack:Destroy()
+        currentEmoteTrack = nil
+    end
+    currentEmoteCharacter = nil
+end
+
+-- ============================================================
+-- UI SETUP
+-- ============================================================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "TwinkhookMM2UI"
 ScreenGui.ResetOnSpawn = false
@@ -241,6 +377,9 @@ DelayPlus.MouseButton1Click:Connect(function()
     UpdateDelayLabel()
 end)
 
+-- ============================================================
+-- CHARACTER HELPERS
+-- ============================================================
 local function SetNoclip(character, state)
     for _, part in ipairs(character:GetDescendants()) do
         if part:IsA("BasePart") then
@@ -316,6 +455,9 @@ local function GetNearestCoin()
     return nearestCoin
 end
 
+-- ============================================================
+-- SHERIFF HUMANE DROP HELPERS
+-- ============================================================
 local function IsLocalPlayerSheriff()
     local char = LocalPlayer.Character
     if not char then return false end
@@ -362,6 +504,9 @@ local function FindClosestInnocent()
     return nearest
 end
 
+-- ============================================================
+-- ROUND EVENT LISTENERS
+-- ============================================================
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local Gameplay = Remotes:WaitForChild("Gameplay")
 local CoinsStarted = Gameplay:WaitForChild("CoinsStarted")
@@ -456,6 +601,9 @@ if LocalPlayer.Character then
 end
 LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)
 
+-- ============================================================
+-- TIMER LOOP (updates Time + Rate)
+-- ============================================================
 task.spawn(function()
     while task.wait(0.1) do
         local elapsed = tick() - SessionStartTime
@@ -469,6 +617,9 @@ task.spawn(function()
     end
 end)
 
+-- ============================================================
+-- TOGGLE
+-- ============================================================
 ToggleButton.MouseButton1Click:Connect(function()
     AutoFarmEnabled = not AutoFarmEnabled
     local character = LocalPlayer.Character
@@ -480,6 +631,7 @@ ToggleButton.MouseButton1Click:Connect(function()
         TouchDelay = 0
         ToggleButton.Text = "Auto Farm: WAITING"
         ToggleButton.TextColor3 = Color3.fromRGB(255, 200, 50)
+        StartEmote()
     else
         ToggleButton.Text = "Auto Farm: OFF"
         ToggleButton.TextColor3 = Color3.fromRGB(255, 60, 60)
@@ -487,9 +639,13 @@ ToggleButton.MouseButton1Click:Connect(function()
         ClaimedCoins = {}
         TouchDelay = 0
         RestoreCharacter()
+        StopEmote()
     end
 end)
 
+-- ============================================================
+-- MAIN LOOP
+-- ============================================================
 RunService.Heartbeat:Connect(function(deltaTime)
     if not AutoFarmEnabled then return end
     if not RoundActive then return end
@@ -520,23 +676,15 @@ RunService.Heartbeat:Connect(function(deltaTime)
             rootPart.CFrame = CFrame.new(targetPos + Vector3.new(0, 1, 0))
             rootPart.AssemblyLinearVelocity = Vector3.zero
             rootPart.AssemblyAngularVelocity = Vector3.zero
-        elseif distance <= 0.3 then
-            rootPart.CFrame = CFrame.new(targetPos)
-            rootPart.AssemblyLinearVelocity = Vector3.zero
-            rootPart.AssemblyAngularVelocity = Vector3.zero
+        elseif distance <= 1.5 then
             ClaimedCoins[targetCoin] = true
             TouchDelay = TouchDelayDuration
             targetCoin = nil
         end
 
-        if targetCoin and distance > 0.3 then
-            local step = GlideSpeed * deltaTime
-            local newPos
-            if step >= distance then
-                newPos = targetPos
-            else
-                newPos = currentPos + (targetPos - currentPos).Unit * step
-            end
+        if targetCoin and distance > 0.8 then
+            local step = math.min(GlideSpeed * deltaTime, distance)
+            local newPos = currentPos + (targetPos - currentPos).Unit * step
 
             rootPart.CFrame = CFrame.new(newPos, Vector3.new(targetPos.X, newPos.Y, targetPos.Z))
             rootPart.AssemblyLinearVelocity = Vector3.zero
